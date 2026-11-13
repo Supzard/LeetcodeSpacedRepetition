@@ -6,8 +6,8 @@ import traceback
 
 #Read the problem setup that piston.ts sends to stdin
 payload = json.loads(sys.stdin.read())
-function_name = payload["function_name"]
-test_cases = payload["test_cases"]
+function_name = payload["functionName"]
+test_cases = payload["testCases"]
 
 #Load the user's code. If it doesn't import, report it to stderr and stop
 try:
