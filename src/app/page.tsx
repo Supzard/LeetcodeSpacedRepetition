@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CodeEditor } from "@/components/CodeEditor";
+import { SubmissionHistory, type SubmissionSummary } from "@/components/SubmissionHistory";
 import { problems } from "@/lib/problems";
 
 type TestResult = {
@@ -13,11 +14,42 @@ type TestResult = {
 
 const problem = problems[0];
 
+async function fetchHistory(): Promise<SubmissionSummary[]> {
+  const res = await fetch(`/api/problems/${problem.slug}/submissions`);
+  if (!res.ok) return [];
+  const data: { submissions: SubmissionSummary[] } = await res.json();
+  return data.submissions;
+}
+
 export default function Home() {
   const [code, setCode] = useState(problem.starterCode);
   const [results, setResults] = useState<TestResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const[loading, setLoading] = useState(false);
+  const[history, setHistory] = useState<SubmissionSummary[]>([]);
+  const[selectedId, setSelectedId] = useState<string | null>(null);
+  
+  useEffect(() => {
+    let ignore = false;
+    fetchHistory().then((subs) => {
+      if (ignore) return;
+      setHistory(subs);
+      if (subs.length > 0) {
+        setCode(subs[0].code);
+        setSelectedId(subs[0].id);
+      }
+    });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  function handleSelect(submission: SubmissionSummary) {
+    setCode(submission.code);
+    setSelectedId(submission.id);
+    setResults(null);
+    setError(null);
+  }
 
   async function handleRun() {
     setLoading(true);
@@ -32,6 +64,11 @@ export default function Home() {
       const data = await res.json();
       if (data.error) setError(data.error);
       else setResults(data.testResults);
+
+      if (data.submissionId) {
+        setSelectedId(data.submissionId);
+        setHistory(await fetchHistory());
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -45,6 +82,7 @@ export default function Home() {
 
       <CodeEditor value={code} onChange={setCode} />
 
+      <div className="mt-4 flex gap-3">
       <button
         onClick={handleRun}
         disabled={loading}
@@ -52,7 +90,17 @@ export default function Home() {
       >
         {loading ? "Running..." : "Run"}
       </button>
-
+      <button
+        onClick={() => {
+          setCode(problem.starterCode);
+          setSelectedId(null);
+        }}
+        className="px-5 py-2 border rounded hover:bg-gray-50"
+        >
+          Reset to starter code
+      </button>
+      </div>
+      
       {error && (
         <pre className="mt-4 p-4 bg-red-50 text-red-800 rounded text-sm whitespace-pre-wrap">
           {error}
@@ -84,6 +132,15 @@ export default function Home() {
           ))}
         </div>
       )}
+
+      <section className = "mt-8">
+        <h2 className="text-xl font-semibold mb-2">Your attempts</h2>
+        <SubmissionHistory
+          submissions={history}
+          selectedId={selectedId}
+          onSelect={handleSelect}
+        />
+      </section>
     </main>
   );
 }
