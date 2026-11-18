@@ -1,14 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
 import { runPython } from "@/lib/piston";
-import { problems } from "@/lib/problems";
+import { Prisma } from "@/generated/prisma/client";
+
+type TestResult = {
+  passed : boolean;
+  actual? : unknown;
+  expected : unknown;
+  error ?: string;
+  stdout : string;
+};
+
+type RunOutcome = 
+  | {testResults: TestResult[]}
+  | {error : string; stdout?: string; stderr?: string};
 
 export async function POST(req: NextRequest) {
   const { slug, code } = await req.json();
-  const problem = problems.find((p) => p.slug === slug);
+
+  //Loads the problem from the prisma database
+  const problem = await prisma.problem.findUnique({ where : { slug }});
   if (!problem) {
     return NextResponse.json({ error: "Problem not found" }, { status: 404 });
   }
 
+  //Run the code in Piston and turn the result into one outcome object
+  let outcome : RunOutcome;
   try {
     const result = await runPython({
       userCode: code,
@@ -16,19 +33,20 @@ export async function POST(req: NextRequest) {
       testCases: problem.testCases,
     });
 
-    if (result.run.stderr && !result.run.stdout) {
-      return NextResponse.json({ error: result.run.stderr });
-    }
-
-    try {
-      const testResults = JSON.parse(result.run.stdout);
-      return NextResponse.json({ testResults });
-    } catch {
-      return NextResponse.json({
-        error: "Could not parse output",
-        stdout: result.run.stdout,
-        stderr: result.run.stderr,
-      });
+    if (result.run.signal === "SIGKILL") {
+      outcome = { error: "Time Limit exceeded 3 seconds. Check for infinite loops."};
+    } else if (result.run.stderr && !result.run.stdout) {
+      outcome = { error: result.run.stderr };
+    } else {
+      try {
+        outcome = { testResults: JSON.parse(result.run.stdout) };
+      } catch {
+        outcome = {
+          error: "Could not parse output",
+          stdout: result.run.stdout,
+          stderr: result.run.stderr,
+        };
+      }
     }
   } catch (e) {
     return NextResponse.json(
@@ -36,4 +54,17 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+  const passed =
+    "testResults" in outcome &&
+    outcome.testResults.length > 0 &&
+    outcome.testResults.every((r) => r.passed);
+  const submission = await prisma.submission.create({
+    data: {
+      problemId: problem.id,
+      code,
+      passed,
+      results: outcome as unknown as Prisma.InputJsonValue,
+    },
+  });
+  return NextResponse.json({...outcome, submissionId: submission.id });
 }
