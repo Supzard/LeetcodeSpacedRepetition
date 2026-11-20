@@ -10,6 +10,8 @@ export async function GET(
     const problem = await prisma.problem.findUnique({
         where: { slug },
         select: {
+            _count: {
+                select: { submissions: true } },
             submissions: {
                 orderBy: { createdAt: "desc" },
                 take: 50,
@@ -21,5 +23,6 @@ export async function GET(
     if (!problem) {
         return NextResponse.json({ error: "Problem not found" }, {status: 404});
     }
-    return NextResponse.json({submissions: problem.submissions});
+    return NextResponse.json({submissions: problem.submissions, 
+        total: problem._count.submissions,});
 }
